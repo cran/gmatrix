@@ -1,7 +1,7 @@
 Package: gmatrix
 Type: Package
 Title: An R Package for Harnessing GPU Power
-Version: 0.1
+Version: 0.2
 Date: 2012-01-20
 Author: Nathan Morris
 Maintainer: Nathan Morris <njm18@case.edu>
@@ -9,9 +9,10 @@ Description: This package implements a general framework for utilizing R to harn
 License: GPL-2
 SystemRequirements: Nvidia's CUDA toolkit (>= release 4.0) and Nvidia
         GPU with compute capibility >=2.0
+OS_type: unix
 URL: https://github.com/njm18/gmatrix
 Depends: methods
-Packaged: 2013-10-30 16:03:18 UTC; nmorris
+Packaged: 2014-08-26 17:42:03 UTC; nmorris
 NeedsCompilation: yes
 Repository: CRAN
-Date/Publication: 2013-10-31 07:44:17
+Date/Publication: 2014-08-26 20:19:32
