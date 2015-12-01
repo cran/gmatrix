@@ -118,8 +118,17 @@ setDevice = function(device,force=FALSE,silent=FALSE,...) {
 	
 	tmp = .C("setDevice",as.integer(device), as.logical(silent))
 #	tmp = .C("setFlagSpin")
-	tmp=.C("startCublas", as.logical(silent))
+    myset=integer(1)
+	tmp=.C("startCublas", as.logical(silent), myset)
 	setTuningPameters(force=force, ...)
+	if(tmp[[2]]==1L) {#not sure why but sometimes cublas give error first time round... jerry riggin' it
+        jerryrig=function() {
+            x= g(matrix(0, 2, 2))
+            y=  g(matrix(c(1, 1)))
+            tmp=.Call("matrix_multiply", x, y, FALSE, FALSE, x@type)
+        }
+        tmp=tryCatch(jerryrig(), error=function(e) return("ERR"))
+	}
 }
 
 
@@ -139,13 +148,22 @@ checkDevice = function(x) {
 }
 
 setTuningPameters=function(force=TRUE, threads_per_block=as.integer(2^8),
-		total_states=as.integer(32*14*16), state=sample.int(10^6,1)) {
+		total_states=as.integer(32*14*16), state=unclass(Sys.time())) {
 	tmp=.C("set_threads_per_block", as.integer(threads_per_block))
 	#SEXP setup_curand(SEXP in_total_states, SEXP in_seed, SEXP in_silent, SEXP in_force)
 	tmp=.Call("setup_curand", as.integer(total_states), as.integer(state), as.logical(.silent), as.logical(force))
 }
 	
-
+gset.seed=function(seed=unclass(Sys.time()), total_states=as.integer(32*14*16), silent=TRUE) {
+	total_states=as.integer(total_states)
+	if(total_states<as.integer(32*14*16))
+		stop("Please make 'total_states' larger.")
+	if(total_states>2^20)
+		stop("Please make 'total_states' smaller.")
+	state=as.integer(state)
+	tmp=.Call("setup_curand", as.integer(total_states), as.integer(state), as.logical(silent), as.logical(TRUE))
+	invisible(tmp)
+}
 #.resetDevice = function() {
 #	warning("Any prviously created GPU variables will now be removed from the GPU.
 #			Referencing such variables will have undesired consequences.")
@@ -288,6 +306,8 @@ ggc=function(silent=FALSE) {
 convertType= function(x, to, dup=TRUE) {
 	if(!(class(x) %in% c("gmatrix", "gvector")))
 		stop("x is not a gpu object, so it's type cannot be converted")
+	#cat(x@device, x@type, class(x),"\n")
+	#print(x)
 	checkDevice(x@device)
 	totype=.type_num(to)
 	fromtype=x@type

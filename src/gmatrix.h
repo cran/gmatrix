@@ -16,6 +16,9 @@
 #include <cublas_v2.h>
 #include <curand_kernel.h>
 
+#if CUDART_VERSION >= 7000
+#include <cusolverDn.h>
+#endif
 
 #include <thrust/reduce.h>
 #include <thrust/functional.h>
@@ -25,43 +28,35 @@
 #include <thrust/iterator/counting_iterator.h>
 
 
-//#define RTRUE (enum Rboolean) 1
-//#define RFALSE (enum Rboolean) 0
-//enum Rbooleen RTRUE;
-//#define DEBUG
-
-//#ifndef max
-//	#define max( a, b ) ( ((a) > (b)) ? (a) : (b) )
-//#endif
-
-//#ifndef min
-//	#define min( a, b ) ( ((a) < (b)) ? (a) : (b) )
-//#endif
-
 #define IDX2(i ,j ,ld) (((j)*(ld))+(i))
 
-/*
-#define GET_BLOCKS_PER_GRID(n, c1, c2, c3)  \
-	int operations_per_thread = 1000/(1+exp(-c1 - n*c2  - n*n*c3));  \
-	operations_per_thread = max(1,operations_per_thread);\
-	int total_threads = (n + operations_per_thread -1) / operations_per_thread ; \
-	int blocksPerGrid = (total_threads + (threads_per_block[currentDevice]) - 1) / (threads_per_block[currentDevice]); \
-	if(blocksPerGrid>MAX_BLOCKS) {  \
-		blocksPerGrid = MAX_BLOCKS;  \
-		total_threads = blocksPerGrid*(threads_per_block[currentDevice]); \
-		operations_per_thread = (n + total_threads -1) / total_threads; \
-	}
-*/
 
-#define GET_BLOCKS_PER_GRID(n)  \
-	int blocksPerGrid = (n + (threads_per_block[currentDevice]) - 1) / (threads_per_block[currentDevice]); \
+
+#if CUDART_VERSION < 6500
+#define GET_BLOCKS_PER_GRID(n, kern)  \
+	int tpb=threads_per_block[currentDevice];\
+	int blocksPerGrid = (n + tpb - 1) / (tpb); \
 	int operations_per_thread = 1;  \
 	if(blocksPerGrid>MAX_BLOCKS) {  \
 		blocksPerGrid = MAX_BLOCKS;  \
-		int total_threads = blocksPerGrid*(threads_per_block[currentDevice]); \
+		int total_threads = blocksPerGrid*tpb; \
 		operations_per_thread = (n + total_threads -1) / total_threads; \
 	}
+#else
+#define GET_BLOCKS_PER_GRID(n, kern)  \
+    int minGridSize;\
+	int tpb;\
+	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &tpb, kern);\
+	int blocksPerGrid = (n + tpb - 1) / (tpb); \
+	int operations_per_thread = 1;  \
+	if(blocksPerGrid>MAX_BLOCKS) {  \
+		blocksPerGrid = MAX_BLOCKS;  \
+		int total_threads = blocksPerGrid*tpb; \
+		operations_per_thread = (n + total_threads -1) / total_threads; \
+	}
+#endif
 
+//Rprintf("tpb = %d, operations_per_thread = %d, blocksPerGrid = %d, minGridSize=%d\n", tpb, operations_per_thread, blocksPerGrid, minGridSize);
 
 #define DECERROR0 cudaError_t  cudaStat
 #define DECERROR1 cudaError_t  cudaStat, status1
@@ -245,18 +240,20 @@
 		(int *) A->d_vec
 
 #define CALL_KERNAL\
-		if(type==0)\
+		if(type==0) {\
 			KERNAL(PTR_DBL, double)\
-		else if(type==1)\
+		} else if(type==1) {\
 			KERNAL(PTR_FLOAT, float)\
-		else \
+		} else {\
 			KERNAL(PTR_INT, int)\
+		}
 
 #define CALL_KERNAL_SF\
-		if(type==0)\
+		if(type==0) {\
 			KERNAL(PTR_DBL, double)\
-		else if(type==1)\
+		} else if(type==1) {\
 			KERNAL(PTR_FLOAT, float)\
+		}
 
 
 #define MAX_DEVICE 20
@@ -272,6 +269,10 @@ GLOBAL __device__ int CUDA_R_Na_int;
 GLOBAL __device__ double CUDA_R_Na_double;
 GLOBAL __device__ float CUDA_R_Na_float;
 GLOBAL cublasHandle_t handle[MAX_DEVICE];
+#if CUDART_VERSION >= 7000
+GLOBAL cusolverDnHandle_t  cudshandle[MAX_DEVICE];
+#endif
+
 GLOBAL int total_states[MAX_DEVICE] ;
 GLOBAL curandState* dev_states[MAX_DEVICE];
 GLOBAL int threads_per_block[MAX_DEVICE] ;
@@ -371,6 +372,8 @@ struct matrix {
 };
 
 
+
+
 #define RNAINT INT_MIN; //works for the moment
 #define RNADOUBLE nan(1954); //works for the moment
 #define RNAFLOAT nanf(1954); //works for the moment
@@ -382,7 +385,7 @@ void initialize_globals();
 SEXP get_device();
 void setDevice(int *device, int *silent);
 SEXP setup_curand(SEXP in_total_states, SEXP in_seed, SEXP in_silent, SEXP in_force);
-void startCublas(int* silent);
+void startCublas(int* silent, int *set);
 void stopCublas(int* silent) ;
 void deviceReset();
 void check_mem(int *freer, int *totr, int *silent);
@@ -415,6 +418,7 @@ SEXP gpu_duplicate(SEXP in_vec, SEXP sn, SEXP in_type);
 SEXP gpu_rep_m(SEXP in_A,SEXP in_n, SEXP in_N, SEXP in_times_each, SEXP in_type);
 SEXP gpu_rep_1(SEXP in_val, SEXP in_N, SEXP in_type);
 SEXP gpu_convert(SEXP A_in, SEXP in_N, SEXP in_type, SEXP in_to_type );
+SEXP gpu_cpy(SEXP ptr_in, SEXP ptr_out, SEXP sn,SEXP in_type);
 
 //indexing an manipulation
 SEXP gpu_numeric_index(SEXP A_in, SEXP n_A_in, SEXP index_in, SEXP n_index_in, SEXP in_type);
@@ -439,16 +443,24 @@ SEXP gpu_order(SEXP A_in, SEXP n_in, SEXP stable_in, SEXP decreasing_in, SEXP in
 SEXP gpu_which(SEXP A_in, SEXP n_in);
 SEXP gpu_seq( SEXP n_in, SEXP init_in, SEXP step_in, SEXP in_type  );
 SEXP gpu_if(SEXP H_in, SEXP A_in, SEXP B_in,SEXP snh, SEXP sna, SEXP snb, SEXP in_type);
-SEXP gpu_rowLogSums(SEXP in_P, SEXP in_rows, SEXP in_cols, SEXP in_type);
+SEXP gpu_rowLogSums(SEXP in_P, SEXP in_rows, SEXP in_endCol, SEXP in_startCol, SEXP in_type);
 
 //matrix multiplications
 SEXP matrix_multiply(SEXP A_in, SEXP B_in, SEXP transa, SEXP transb, SEXP in_type);//ordinary matrix multiplication
-SEXP gpu_gmm(SEXP A_in, SEXP B_in, SEXP C_in, SEXP transa, SEXP transb, SEXP in_type);
+SEXP gpu_gmm(SEXP A_in, SEXP B_in, SEXP C_in, SEXP transa, SEXP transb, SEXP accum, SEXP in_type);
 SEXP gpu_outer(SEXP A_in, SEXP B_in,SEXP n_A_in, SEXP n_B_in, SEXP op_in, SEXP in_type);
 SEXP gpu_kernal_sumby(SEXP A_in, SEXP index1_in,SEXP index2_in,SEXP n_A_in,SEXP n_index_in, SEXP in_type);
 SEXP gpu_kronecker(SEXP A_in, SEXP B_in,SEXP n_A_row_in,SEXP n_A_col_in, SEXP n_B_row_in,SEXP n_B_col_in, SEXP in_type);
 SEXP gpu_mat_times_diag_vec(SEXP A_in, SEXP B_in, SEXP n_row_in, SEXP n_col_in, SEXP in_type);
 
+SEXP rcusolve_qr(SEXP A_in, SEXP qraux_in);
+SEXP rcusolve_modqr_coef(SEXP qr_in, SEXP qraux_in, SEXP B_in);
+SEXP rcusolve_svd(SEXP A_in,SEXP  S_in, SEXP U_in,SEXP  VT_in);
+SEXP rcusolve_chol(SEXP A_in);
+
+//SEXP rcula_eigen_symm(SEXP A_in, SEXP val_in);
+//SEXP rcusolve_dgesv(SEXP A_in, SEXP B_in);
+//SEXP check_inverse_condition(SEXP Ain, SEXP Avalsin, SEXP permin, SEXP tolin) ;
 
 //simple binary operations
 #define BINARYOPDEF(MNAME) \
@@ -545,7 +557,9 @@ SEXP gpu_isnan(SEXP y, SEXP sn, SEXP in_type);
 SEXP gpu_isfinite(SEXP y, SEXP sn, SEXP in_type);
 SEXP gpu_isinfinite(SEXP y, SEXP sn, SEXP in_type);
 
-
+//gfunction
+//SEXP gpu_gfunction_call(SEXP args_in, SEXP each_arg_len_in, SEXP fid_in, SEXP varid_in, SEXP outlen_in, SEXP in_type);
+SEXP cudaVersion();
 
 
 

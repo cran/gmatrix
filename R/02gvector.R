@@ -33,32 +33,28 @@ gvector = function(length, type="d") {
 	return(g.rep(0, times=length, type=type))
 }
 
-g.rep =function(x, times=1L, each=NULL, type=NULL) {
+g.rep =function(x, times=1L, each=1L, type=NULL) {
 	if(is.null(type))
 		tryCatch(typeno<- .Rclass_to_type(x),
 				error=function(i) stop("Class of data cannot be converted to gpu type.", call. = FALSE))
 	else
 		typeno=.type_num(type)
-	times=times[1]
-	ret = new("gvector",length=as.integer(length(x)*times), type=typeno)
+	times=as.integer(times[1])
+	each=as.integer(each[1])
+	ret = new("gvector",length=as.integer(length(x)*times*each), type=typeno)
 	if(length(ret)==0)
 		return(ret)
 	if(length(x)==1L) {
 		tryCatch(x <- .convert_to_appropriate_class(x,typeno), error=function(e) stop("Invalid value for x, or invalid type.", call. = FALSE))
-		ret@ptr = .Call("gpu_rep_1",x,as.integer(times) ,typeno)#gpu_rep_1(SEXP in_val, SEXP in_N)
+		ret@ptr = .Call("gpu_rep_1",x,length(ret) ,typeno)#gpu_rep_1(SEXP in_val, SEXP in_N)
 	} else {
-		
-		if(is.null(each)) 
-			te=1L
-		else
-			te=0L
 		
 		if(class(x)!="gvector")
 			x=as.gvector(x)
 		x=convertType(x,typeno,dup=FALSE)
 		x@names=NULL
 		
-		ret@ptr = .Call("gpu_rep_m", x@ptr, as.integer(length(x)), as.integer(times), te , typeno)#gpu_rep_m(SEXP in_A,SEXP in_n, SEXP in_N, SEXP in_times_each);
+		ret@ptr = .Call("gpu_rep_m", x@ptr, as.integer(length(x)), times, each , typeno)#gpu_rep_m(SEXP in_A,SEXP in_n, SEXP in_N, SEXP in_times_each);
 	}
 	
 	return(ret)
@@ -448,42 +444,53 @@ setMethod("t", "gvector",
 )
 
 setMethod("[", "gvector", 
-		function(x, i, j,...,drop=TRUE) {
-			if(!missing(j)){
-				stop("incorrect number of dimenstions")
-			}
-			checkDevice(x@device)
-			i=.check_make_valid(i, length(x),names(x))
-			ret=new("gvector", 
-					ptr=.Call("gpu_numeric_index", x@ptr, length(x), i@ptr, length(i), x@type),
-					length=length(i), type=x@type)
-			
-			if(!is.null(names(x)))
-				names(ret)=names(x)[i]
-			
-			return(ret)
-		}
+                function(x, i, j,...,drop=TRUE) {
+                        if(!missing(j)){
+                                stop("incorrect number of dimenstions")
+                        }
+			if(missing(i))
+				return(gdup(x))
+                        checkDevice(x@device)
+                        i=.check_make_valid(i, length(x),names(x))
+                        ret=new("gvector", 
+                                        ptr=.Call("gpu_numeric_index", x@ptr, length(x), i@ptr, length(i), x@type),
+                                        length=length(i), type=x@type)
+
+                        if(!is.null(names(x)))
+                                names(ret)=names(x)[as.integer(i)]
+
+                        return(ret)
+                }
 )
 
-setReplaceMethod("[", "gvector", 
-		function(x, i, j,..., value) {
-			
-			if(!missing(j)){
-				stop("incorrect number of dimenstions")
-			}
-			if(!(class(value) %in% c("gvector","gmatrix")))
-				value=as.gvector(value, type=x@type, dup=FALSE)
-			checkDevice(c(x@device, value@device))
-			if(x@type!=value@type)
-				type(value)=x@type
-			i=.check_make_valid(i, length(x),names(x),TRUE)
-			
-			#gpu_numeric_index_set(SEXP A_in, SEXP n_A_in, SEXP val_in, SEXP n_val_in, SEXP index_in, SEXP n_index_in)
-			junk=.Call("gpu_numeric_index_set", x@ptr, length(x), value@ptr, length(value), i@ptr, length(i), x@type)
 
-			
-			return(x)
-		}
+
+setReplaceMethod("[", "gvector", 
+                function(x, i, j,..., value) {
+
+                        if(!missing(j)){
+                                stop("incorrect number of dimenstions")
+                        }
+                        if(!(class(value) %in% c("gvector","gmatrix")))
+                                value=as.gvector(value, type=x@type, dup=FALSE)
+                        checkDevice(c(x@device, value@device))
+                        if(x@type!=value@type)
+                                type(value)=x@type
+			if(missing(i)){
+				if(length(value)!=length(x))
+					stop("Number of items to replace is not equal to the number of items")
+				tmp=.Call("gpu_cpy",value@ptr, x@ptr, length(x),x@type)
+				return(x)
+			}
+				
+                        i=.check_make_valid(i, length(x),names(x),TRUE)
+
+                        #gpu_numeric_index_set(SEXP A_in, SEXP n_A_in, SEXP val_in, SEXP n_val_in, SEXP index_in, SEXP n_index_in)
+                        junk=.Call("gpu_numeric_index_set", x@ptr, length(x), value@ptr, length(value), i@ptr, length(i), x@type)
+
+
+                        return(x)
+                }
 )
 
 as.matrix.gvector =  function(x, ...) {

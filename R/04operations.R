@@ -221,7 +221,7 @@ setMethod("%*%", signature(x = "matrix", y= "gvector"),
 ##############################################
 #       GMM function to avoid the allocating C
 ##############################################
-gmm = function(A, B, C, trA=FALSE, trB=FALSE) {
+gmm = function(A, B, C, trA=FALSE, trB=FALSE, accum=FALSE) {
   if(class(A)=="gvector")
     A=gmatrix(A,nrow=1,dup=FALSE)
   else if(class(A)!="gmatrix")
@@ -234,11 +234,14 @@ gmm = function(A, B, C, trA=FALSE, trB=FALSE) {
     C=gmatrix(C,ncol=1,dup=FALSE)
   else if(class(C)!="gmatrix")
     stop("C must be of class 'gmatrix' or 'gvector.'")
+  accum=as.logical(accum)[1]
   
   if(A@type!=B@type || B@type !=C@type)
     stop("A, B and C must all have the same type.")
-  # SEXP gpu_gmm(SEXP A_in, SEXP B_in, SEXP C_in, SEXP transa, SEXP transb, SEXP in_type)
-  invisible(.Call("gpu_gmm", A, B, C, trA, trB, A@type))
+  if(A@type>1)
+    stop("The 'gmm' function may only be used for type 'single' or 'double.' Please convert first.")
+  # SEXP gpu_gmm(SEXP A_in, SEXP B_in, SEXP C_in, SEXP transa, SEXP transb,  SEXP accum, SEXP in_type)
+  invisible(.Call("gpu_gmm", A, B, C, trA, trB, accum, A@type))
 }
 
 
@@ -418,7 +421,7 @@ setMethod("tcrossprod", signature(x = "gmatrix", y = "logical"), .tcp)
 setMethod("tcrossprod", signature(x = "gvector", y = "gmatrix"), .tcp)
 setMethod("tcrossprod", signature(x = "gmatrix", y = "gvector"), .tcp)
 setMethod("tcrossprod", signature(x = "gvector", y = "gvector"), .tcp)
-setMethod("tcrossprod", signature(x = "gvector", y = "missing"), .tcp)
+setMethod("tcrossprod", signature(x = "gvector", y = "missing"), function(x,y) {.tcp(x,x)})
 setMethod("tcrossprod", signature(x = "gvector", y = "numeric"), .tcp)
 setMethod("tcrossprod", signature(x = "numeric", y = "gvector"), .tcp)
 setMethod("tcrossprod", signature(x = "gvector", y = "logical"), .tcp)
@@ -567,14 +570,22 @@ setMethod("rowSums",  "gmatrix",
 		}
 )
 
-rowLogSums = function(x) {
+gRowLogSums = function(x, startCol=1L, endCol=ncol(x)) {
 	
 	if(class(x)!="gmatrix")
 		stop("Object must be of class 'gmatrix.'")
 	if(x@type>1L)
 		stop("Invalid type")
+	startCol=as.integer(startCol)
+    endCol=as.integer(endCol)	
+	if(startCol<1L || startCol>ncol(x) || startCol>endCol)
+		stop("Invalid startCol.")
+	if(endCol<1L || endCol>ncol(x) )
+		stop("Invalid endCol.")
+		
 	checkDevice(x@device)
-	ret = new("gvector", ptr=.Call("gpu_rowLogSums", ptr=x@ptr, nrow(x), ncol(x), x@type),
+	ret = new("gvector", ptr=.Call("gpu_rowLogSums", ptr=x@ptr,
+			nrow(x), endCol, startCol, x@type),
 			length=nrow(x),type=x@type)
 	return(ret)
 }

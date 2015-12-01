@@ -156,8 +156,10 @@ gtest =function() {
 				y=h(y)
 			}
 			tmp=sum((y-x)^2)/sum(x^2)
-			if(tmp>10^-6)
-				mywarnings=c(mywarnings,"not equal")
+			if(!is.numeric(tmp)||any(is.na(tmp)))
+					mywarnings=c(mywarnings,paste(mywarnings, "result missing or not numeric."))
+			else if(tmp>10^(-6))
+					mywarnings=c(mywarnings,"not equal")
 		}
 		if(length(mywarnings)>0) {
 			c1=ifelse(gpu1,paste(ifelse(mat1,"gmatrix","gvector"),"of type",.type_name(type1)),
@@ -182,7 +184,7 @@ gtest =function() {
 	for(op in multOps) {	
 	#	browser()
 		#suppressWarnings(setGeneric("%op%",op[[2]],where=globalenv()))
-		
+		#print(op)
 		opname=op[[1]]
 		opf=op[[2]]
 		for(i in 1:4){
@@ -556,8 +558,8 @@ gtest =function() {
 	cat("Checking logRowSums... \n")
 	tmp=cbind(rep(7,10000),1,1,1)
 	gtmp=g(log(tmp))
-	if(any( abs(h(rowLogSums(gtmp))-log(10))>10^-9))
-		warningslist<-c(warningslist, "Error in 'rowLogSums.'")
+	if(any( abs(h(gRowLogSums(gtmp))-log(10))>10^-9))
+		warningslist<-c(warningslist, "Error in 'gRowLogSums.'")
 	
 	cat("Checking indexing and diag functions... \n")
 	for(i in 1:4) {
@@ -707,7 +709,6 @@ gtest =function() {
 	#uniform
 	mycheck(sapply(c(.01, .5, 1, 5, 10), function(min) {
 						tmp = lapply(c(.01, .5, 1, 5, 10)+10, function(max) {
-									#cat(min,max,"\n");
 									dosimcont(
 											qdistfun=function(q) qunif(q,min,max),
 											rdistfun=function(n) grunif(n,min,max)
@@ -741,7 +742,7 @@ gtest =function() {
 	#todo: check rsample
 	# tmp=cbind(rep(7,10000),1,1,1)
 	# gtmp=g(log(tmp))
-	# rowLogSums(gtmp)
+	# gRowLogSums(gtmp)
 	# table(h(rsample(gtmp)))
 
 	cat("Checking distribution functions...\n")
@@ -775,8 +776,56 @@ gtest =function() {
 			pnorm(((-10):10)/2, mean=c(1,2), sd=c(1,2,3,4), log.p=TRUE), "gpnorm")
 	checkd( gpnorm(((-10):10)/2, mean=c(1,2), sd=c(1,2,3,4),warn=FALSE),
 			pnorm(((-10):10)/2, mean=c(1,2), sd=c(1,2,3,4)), "gpnorm")
-	
+			
+			
 
+	if(.Call("cudaVersion")>=7000L) {
+		cat("Checking solver functions...\n")
+		checkD=function(x1,y1, funnm) {
+			yexpr=substitute(y1)
+			xexpr=substitute(x1)
+			tmpnm=deparse(expr=xexpr)
+			mywarnings=character(0)
+
+			x=tryCatch(eval(xexpr), error=function(e) {
+			mywarnings<<-conditionMessage(e)
+			return(-99999L)})
+
+			if(as.logical(x[1]!=-99999L)) {
+				y=eval(yexpr)
+				tmp=sum((y-x)^2)/sum(x^2)
+
+				if(!is.numeric(tmp)||any(is.na(tmp)))
+					mywarnings=c(mywarnings,paste(funnm, ":result missing or not numeric."))
+				else if(tmp>10^(-6))
+					mywarnings=c(mywarnings,paste(funnm, ":result not equal to host value."))
+			}
+			warningslist<<-c(warningslist,mywarnings)
+		}
+
+		#SVD
+		hm=matrix(rnorm(10^2*2),20,10)
+		gdm=g(hm)
+		gsm=g(hm, type="s")
+		checkD(svd(hm)$d, h(svd(gdm)@S), "svd double")
+		checkD(svd(hm)$d, h(svd(gsm)@S), "svd single")
+
+		#QR
+		hb=matrix(rnorm(4),20,2)
+		gdb=g(hb)
+		gsb=g(hb, type="s")
+		hcoefqr = qr.coef(qr(hm)   ,hb) 
+		checkD(hcoefqr, h(gqr.coef(qr(gdm),gdb)) , "qr/gqr.coef double")
+		checkD(hcoefqr, h(gqr.coef(qr(gsm),gsb)) , "qr/gqr.coef single")
+		checkD(hcoefqr, h(gqr.coef(qr(gdm),hb))  , "qr/gqr.coef double / host")
+
+		#QR
+		hm =t(hm) %*% hm
+		gdm=g(hm)
+		gsm=g(hm, type="s")
+		checkD(chol(hm), h(chol(gdm)), "chol double")
+		checkD(chol(hm), h(chol(gsm)), "chol single")	
+	}
 	
 	if(length(warningslist)==0)
 		cat("No errors or warnings\n")
@@ -796,5 +845,5 @@ gtest =function() {
 		}
 	}
 	
-	return(TRUE)
+	invisible(TRUE)
 }

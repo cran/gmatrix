@@ -3,8 +3,12 @@ useDynLib(gmatrix, .registration=TRUE)
 exportPattern("^[^\\.]")
 
 
-exportClasses("gmatrix", "gvector")
-importFrom("methods",getMethod)
+exportClasses("gmatrix", "gvector", "gqr", "gsvd", "lpgr")
+importFrom("methods", getMethod, "callNextMethod", "new", "show")
+importFrom("stats", "approxfun", "dbeta", "dbinom", "dgamma", "dnorm",
+             "dpois", "dunif", "pbinom", "pchisq", "pnorm", "ppois",
+             "qbeta", "qbinom", "qgamma", "qnorm", "qpois", "qunif",
+             "rnorm", "runif")
 
 exportMethods(
     "^",
@@ -68,7 +72,12 @@ exportMethods(
 	'is.na',
 	'is.nan',
 	'is.finite',
-	'is.infinite')
+	'is.infinite',
+	'qr',
+    'gqr.coef',
+    'solve',
+	'svd',
+	'chol')
 
 
 
